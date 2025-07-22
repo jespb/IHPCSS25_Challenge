@@ -17,7 +17,7 @@
 /// Parameters used in pagerank convergence, do not change.
 #define DAMPING_FACTOR 0.85
 /// The number of seconds to not exceed forthe calculation loop.
-#define MAX_TIME 10
+#define MAX_TIME 1
 
 /**
  * @brief Indicates which vertices are connected.
@@ -77,6 +77,7 @@ void calculate_pagerank(double pagerank[])
             new_pagerank[i] = 0.0;
         }
 
+        #pragma omp parallel for
         for(int i = 0; i < GRAPH_ORDER; i++)
         {
             for(int j = 0; j < GRAPH_ORDER; j++)
