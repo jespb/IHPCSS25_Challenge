@@ -67,10 +67,9 @@ void calculate_pagerank(double pagerank[])
         new_pagerank[i] = 0.0;
     }
 
-    #pragma omp target enter data map(to: adjacency_matrix[0:GRAPH_ORDER][0:GRAPH_ORDER], \
-                                          pagerank[0:GRAPH_ORDER], \
-                                          damping_value) \
-                                  map(alloc: new_pagerank[0:GRAPH_ORDER])
+    #pragma omp target data map(to: adjacency_matrix[0:GRAPH_ORDER][0:GRAPH_ORDER], \
+                                          pagerank[0:GRAPH_ORDER]) \
+                            map(alloc: new_pagerank[0:GRAPH_ORDER])
 
 
     // If we exceeded the MAX_TIME seconds, we stop. If we typically spend X seconds on an iteration, and we are less than X seconds away from MAX_TIME, we stop.
@@ -79,67 +78,57 @@ void calculate_pagerank(double pagerank[])
 
         double iteration_start = omp_get_wtime();
 
-        #pragma omp target teams map(tofrom: min_diff, max_diff, total_diff, pagerank[0:GRAPH_ORDER])
-        { // *** start GPU ***
+        #pragma omp target teams distribute parallel for
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            new_pagerank[i] = 0.0;
+        }
 
-            #pragma omp distribute parallel for
-            for(int i = 0; i < GRAPH_ORDER; i++)
+        #pragma omp target teams distribute parallel for collapse(2)
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            for(int j = 0; j < GRAPH_ORDER; j++)
             {
-                new_pagerank[i] = 0.0;
-            }
-
-            #pragma omp distribute parallel for collapse(2)
-            for(int i = 0; i < GRAPH_ORDER; i++)
-            {
-                for(int j = 0; j < GRAPH_ORDER; j++)
+                if (adjacency_matrix[j][i] == 1.0)
                 {
-                    if (adjacency_matrix[j][i] == 1.0)
+                    int outdegree = 0;
+
+                    for(int k = 0; k < GRAPH_ORDER; k++)
                     {
-                        int outdegree = 0;
-
-                        for(int k = 0; k < GRAPH_ORDER; k++)
+                        if (adjacency_matrix[j][k] == 1.0)
                         {
-                            if (adjacency_matrix[j][k] == 1.0)
-                            {
-                                outdegree++;
-                            }
+                            outdegree++;
                         }
-                        new_pagerank[i] += pagerank[j] / (double)outdegree;
                     }
+                    new_pagerank[i] += pagerank[j] / (double)outdegree;
                 }
             }
+        }
 
-            #pragma omp distribute parallel for
-            for(int i = 0; i < GRAPH_ORDER; i++)
-            {
-                new_pagerank[i] = DAMPING_FACTOR * new_pagerank[i] + damping_value;
-            }
-        
-            diff = 0.0;
-            #pragma omp distribute parallel for reduction(+:diff)
-            for(int i = 0; i < GRAPH_ORDER; i++)
-            {
-                diff += fabs(new_pagerank[i] - pagerank[i]);
-            }
-
-            #pragma omp parallel // do this only once
-            {
-                if (omp_get_team_num() == 0 && omp_get_thread_num() == 0) {
-                    max_diff = (max_diff < diff) ? diff : max_diff;
-                    total_diff += diff;
-                    min_diff = (min_diff > diff) ? diff : min_diff;
-                }
-                #pragma omp barrier 
-            }
+        #pragma omp target teams distribute parallel for
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            new_pagerank[i] = DAMPING_FACTOR * new_pagerank[i] + damping_value;
+        }
+    
+        diff = 0.0;
+        #pragma omp target teams distribute parallel for reduction(+:diff)
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            diff += fabs(new_pagerank[i] - pagerank[i]);
+        }
 
 
-            #pragma omp distribute parallel for
-            for(int i = 0; i < GRAPH_ORDER; i++)
-            {
-                pagerank[i] = new_pagerank[i];
-            }
+        max_diff = (max_diff < diff) ? diff : max_diff;
+        total_diff += diff;
+        min_diff = (min_diff > diff) ? diff : min_diff;
 
-        } // *** end GPU ***
+
+        #pragma omp target teams distribute parallel for
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            pagerank[i] = new_pagerank[i];
+        }
 
 
         double pagerank_total = 0.0;
