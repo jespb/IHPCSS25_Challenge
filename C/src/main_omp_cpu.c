@@ -10,7 +10,7 @@
 #include <stdlib.h>
 #include <math.h>
 #include <omp.h>
-//#include <mpi.h>
+#include <mpi.h>
 
 /// The number of vertices in the graph.
 #define GRAPH_ORDER 1000
@@ -77,51 +77,26 @@ void calculate_pagerank(double pagerank[])
             new_pagerank[i] = 0.0;
         }
 
-
-
-        #pragma omp target
-        { // *** start GPU ***
-                            if(omp_is_initial_device())
-                {
-                printf("I am on the host\n");
-                }
-                else
-                {
-                printf("I am on the device.\n");
-                }
-        } // *** end GPU ***
-
-
-            for(int i = 0; i < GRAPH_ORDER; i++)
+        #pragma omp parallel for
+        for(int i = 0; i < GRAPH_ORDER; i++)
+        {
+            for(int j = 0; j < GRAPH_ORDER; j++)
             {
-                if(omp_is_initial_device())
+                if (adjacency_matrix[j][i] == 1.0)
                 {
-                printf("I am on the host\n");
-                }
-                else
-                {
-                printf("I am on the device.\n");
-                }
+                    int outdegree = 0;
 
-                for(int j = 0; j < GRAPH_ORDER; j++)
-                {
-                    if (adjacency_matrix[j][i] == 1.0)
+                    for(int k = 0; k < GRAPH_ORDER; k++)
                     {
-                        int outdegree = 0;
-
-                        for(int k = 0; k < GRAPH_ORDER; k++)
+                        if (adjacency_matrix[j][k] == 1.0)
                         {
-                            if (adjacency_matrix[j][k] == 1.0)
-                            {
-                                outdegree++;
-                            }
+                            outdegree++;
                         }
-                        new_pagerank[i] += pagerank[j] / (double)outdegree;
                     }
+                    new_pagerank[i] += pagerank[j] / (double)outdegree;
                 }
             }
-
-        //} // *** end GPU ***
+        }
 
         for(int i = 0; i < GRAPH_ORDER; i++)
         {
