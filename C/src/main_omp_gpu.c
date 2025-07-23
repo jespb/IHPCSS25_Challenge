@@ -68,18 +68,21 @@ void calculate_pagerank(double pagerank[])
     }
 
     #pragma omp target enter data map(to: adjacency_matrix[0:GRAPH_ORDER][0:GRAPH_ORDER], \
-                                          pagerank[0:GRAPH_ORDER], \
-                                          damping_value) \
-                                  map(alloc: new_pagerank[0:GRAPH_ORDER])
+                                         pagerank[0:GRAPH_ORDER], \
+                                         new_pagerank[0:GRAPH_ORDER], \
+                                         GRAPH_ORDER, diff)
 
 
     // If we exceeded the MAX_TIME seconds, we stop. If we typically spend X seconds on an iteration, and we are less than X seconds away from MAX_TIME, we stop.
     while(elapsed < MAX_TIME && (elapsed + time_per_iteration) < MAX_TIME)
     {
 
+
         double iteration_start = omp_get_wtime();
 
-        #pragma omp target teams map(tofrom: min_diff, max_diff, total_diff, pagerank[0:GRAPH_ORDER])
+        #pragma omp target update map(to: pagerank[0:GRAPH_ORDER])
+
+        #pragma omp target teams 
         { // *** start GPU ***
 
             #pragma omp distribute parallel for
@@ -88,7 +91,7 @@ void calculate_pagerank(double pagerank[])
                 new_pagerank[i] = 0.0;
             }
 
-            #pragma omp distribute parallel for collapse(2)
+            #pragma omp distribute parallel for // collapse(2)
             for(int i = 0; i < GRAPH_ORDER; i++)
             {
                 for(int j = 0; j < GRAPH_ORDER; j++)
@@ -99,14 +102,17 @@ void calculate_pagerank(double pagerank[])
 
                         for(int k = 0; k < GRAPH_ORDER; k++)
                         {
+
                             if (adjacency_matrix[j][k] == 1.0)
                             {
                                 outdegree++;
                             }
+                       
                         }
                         new_pagerank[i] += pagerank[j] / (double)outdegree;
                     }
                 }
+                
             }
 
             #pragma omp distribute parallel for
@@ -115,6 +121,8 @@ void calculate_pagerank(double pagerank[])
                 new_pagerank[i] = DAMPING_FACTOR * new_pagerank[i] + damping_value;
             }
         
+
+        
             diff = 0.0;
             #pragma omp distribute parallel for reduction(+:diff)
             for(int i = 0; i < GRAPH_ORDER; i++)
@@ -122,7 +130,9 @@ void calculate_pagerank(double pagerank[])
                 diff += fabs(new_pagerank[i] - pagerank[i]);
             }
 
-            #pragma omp parallel // do this only once
+
+
+            #pragma omp parallel
             {
                 if (omp_get_team_num() == 0 && omp_get_thread_num() == 0) {
                     max_diff = (max_diff < diff) ? diff : max_diff;
@@ -138,25 +148,34 @@ void calculate_pagerank(double pagerank[])
             {
                 pagerank[i] = new_pagerank[i];
             }
-
         } // *** end GPU ***
+        #pragma omp target update from(pagerank[0:GRAPH_ORDER])
+
+            double pagerank_total = 0.0;
+            //#pragma omp distribute parallel for reduction(+:pagerank_total)
+            for(int i = 0; i < GRAPH_ORDER; i++)
+            {
+                pagerank_total += pagerank[i];
+            }
 
 
-        double pagerank_total = 0.0;
-        #pragma omp parallel for reduction(+:pagerank_total)
-        for(int i = 0; i < GRAPH_ORDER; i++)
-        {
-            pagerank_total += pagerank[i];
-        }
 
+            //#pragma omp parallel
+            //{
+                if (omp_get_team_num() == 0 && omp_get_thread_num() == 0) {
+                    if(fabs(pagerank_total - 1.0) >= 1E-12){
+                        printf("[ ERROR] Iteration %d: sum of all pageranks is not 1 but %.12f.\n", iteration, pagerank_total);
+                    }
+                    else{
+                        printf("[  OK  ] Iteration %d.\n", iteration);
+                    }
+                }
 
-        if(fabs(pagerank_total - 1.0) >= 1E-12){
-            printf("[ ERROR] Iteration %d: sum of all pageranks is not 1 but %.12f.\n", iteration, pagerank_total);
-        }
-        else{
-            printf("[  OK  ] Iteration %d.\n", iteration);
-        }
+               // #pragma omp barrier 
+            //}
 
+        //} // *** end GPU ***
+        
 		double iteration_end = omp_get_wtime();
 		elapsed = omp_get_wtime() - start;
 		iteration++;
@@ -164,6 +183,8 @@ void calculate_pagerank(double pagerank[])
     }
 
 
+    #pragma omp target update map(from: pagerank[0:GRAPH_ORDER])
+    
     printf("%d iterations achieved in %.2f seconds\n", iteration, elapsed);
 }
 
